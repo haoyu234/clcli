@@ -1,26 +1,37 @@
-#include <assert.h>
-#include <columns.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+#include <columns.h>
 
 #include "coder.h"
 #include "generated.h"
 
+struct stJson json = {
+    .kind = 3,
+    .via = {
+        .f64 = 3.14159265358979323846
+    },
+};
+
+int runExample(
+    const clColumn *column, 
+    void *object,
+    uint32_t size)
+{
+    char object2[size];
+    uint8_t buf[size * 2];
+
+    const size_t size1 = cToBuf(column, object, size, buf, sizeof(buf));
+    const size_t size2 = cFromBuf(column, object2, size, buf, sizeof(buf));
+
+    printf("size1[%lu] size2[%lu].\n", size1, size2);
+    return size1 - size2;
+}
+
 int main()
 {
-    uint8_t buf[1024];
-
-    uv_statfs_t cObject1 = {};
-    uv_statfs_t cObject2 = {
-        1,2,3,4,5,6,7,{8,9,10,11}
-    };
-
-    const size_t size1 = cToBuf(uv_statfs_sObject, &cObject2, buf, sizeof(buf));
-    const size_t size2 = cFromBuf(uv_statfs_sObject, &cObject1, buf, sizeof(buf));
-    assert(size1 == size2);
-
-    const bool same = !memcmp(&cObject2, &cObject1, sizeof(uv_statfs_t));
-    assert(same);
-    return 0;
+    return runExample(
+        stJsonObject,
+        &json,
+        sizeof(json));
 }
 

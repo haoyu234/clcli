@@ -14,7 +14,8 @@ void processFile(
         path,
         argv, argc,
         0, 0,
-        CXTranslationUnit_SkipFunctionBodies);
+        CXTranslationUnit_SkipFunctionBodies
+        | CXTranslationUnit_SingleFileParse);
 
     uint32_t flags = 0;
 

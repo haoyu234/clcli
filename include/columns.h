@@ -21,8 +21,9 @@
 #define cl_COLUMN_FLOAT256         18
 #define cl_COLUMN_BOOL             50
 #define cl_COLUMN_OBJECT           51
-#define cl_COLUMN_FIXED_ARRAY      52
-#define cl_COLUMN_FLEXIBLE_ARRAY   53
+#define cl_COLUMN_UNION            52
+#define cl_COLUMN_FIXED_ARRAY      53
+#define cl_COLUMN_FLEXIBLE_ARRAY   54
 
 #ifdef __cplusplus 
 #include <cstddef>
@@ -42,6 +43,7 @@ extern "C" {
 typedef struct clFixedArray clFixedArray;
 typedef struct clFlexibleArray clFlexibleArray;
 typedef struct clObject clObject;
+typedef struct clUnion clUnion;
 typedef struct clColumn clColumn;
 typedef struct clHandler clHandler;
 typedef struct clDecoder clDecoder;
@@ -53,7 +55,12 @@ typedef void (*clVisitHandler)(
 
 struct clObject {
     uint32_t num;
-    const clColumn *element;
+    const clColumn *fields;
+};
+
+struct clUnion {
+    uint32_t num;
+    const clColumn *fields;
 };
 
 struct clFixedArray {
@@ -64,6 +71,8 @@ struct clFixedArray {
 
 struct clFlexibleArray {
     uint8_t flags;
+    const clColumn *len;
+    uint32_t capacity;
     const clColumn *element;
 };
 
@@ -73,15 +82,17 @@ struct clColumn {
     uint32_t size;
     ptrdiff_t offset;
     union {
-        clObject object;
-        clFixedArray fixedArray;
-        clFlexibleArray flexibleArray;
+        clObject viaObject;
+        clUnion viaUnion;
+        clFixedArray viaFixedArray;
+        clFlexibleArray viaFlexibleArray;
     };
 };
 
 struct clHandler {
     clVisitHandler visitNumber;
     clVisitHandler visitObject;
+    clVisitHandler visitUnion;
     clVisitHandler visitFixedArray;
     clVisitHandler visitFlexibleArray;
 };
@@ -109,7 +120,7 @@ struct clColumnTraits
             cl_COLUMN_INT8 + __builtin_ctz(sizeof(T)) : \
             cl_COLUMN_NONE);
 };
-#define OBJECT_FIELD_TYPE(PARENT, FIELD) \
+#define COLUMN_TYPE(PARENT, FIELD) \
     clColumnTraits< \
         std::remove_cv< \
             std::remove_reference< \
@@ -118,7 +129,7 @@ struct clColumnTraits
         >::type \
     >::kind
 #else
-#define OBJECT_FIELD_TYPE(PARENT, FIELD) \
+#define COLUMN_TYPE(PARENT, FIELD) \
     _Generic( \
         (((PARENT *) NULL)->FIELD), \
         char: cl_COLUMN_INT8, \
@@ -130,52 +141,67 @@ struct clColumnTraits
         uint16_t: cl_COLUMN_UINT16, \
         uint32_t: cl_COLUMN_UINT32, \
         uint64_t: cl_COLUMN_UINT64, \
+        float: cl_COLUMN_FLOAT32, \
+        double: cl_COLUMN_FLOAT64, \
         bool: cl_COLUMN_BOOL, \
         default: cl_COLUMN_NONE \
     )
 #endif
 
-#define DEFINE_OBJECT_FIELD_NUMBER(PARENT, FIELD) { \
+#define DEFINE_COLUMN_NUMBER(PARENT, FIELD) { \
     .name = #FIELD, \
-    .kind = OBJECT_FIELD_TYPE(PARENT, FIELD), \
+    .kind = COLUMN_TYPE(PARENT, FIELD), \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
 }
 
-#define DEFINE_OBJECT_FIELD_OBJECT(PARENT, FIELD, FIELDS) { \
+#define DEFINE_COLUMN_OBJECT(PARENT, FIELD, FIELDS) { \
     .name = #FIELD, \
     .kind = cl_COLUMN_OBJECT, \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
     { \
-        .object = { \
+        .viaObject = { \
             .num = sizeof(FIELDS) / sizeof(FIELDS[0]), \
-            .element = FIELDS, \
+            .fields = FIELDS, \
         }, \
     }, \
 }
 
-#define DEFINE_OBJECT_FIELD_FIXED_ARRAY(PARENT, FIELD) { \
+#define DEFINE_COLUMN_UNION(PARENT, FIELD, FIELDS) { \
+    .name = #FIELD, \
+    .kind = cl_COLUMN_UNION, \
+    .size = sizeof(((PARENT *) NULL)->FIELD), \
+    .offset = offsetof(PARENT, FIELD), \
+    { \
+        .viaUnion = { \
+            .num = sizeof(FIELDS) / sizeof(FIELDS[0]), \
+            .fields = FIELDS, \
+        }, \
+    }, \
+}
+
+#define DEFINE_COLUMN_FIXED_ARRAY(PARENT, FIELD) { \
     .name = #FIELD, \
     .kind = cl_COLUMN_FIXED_ARRAY, \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
     { \
-        .fixedArray = { \
-            .flags = OBJECT_FIELD_TYPE(PARENT, FIELD[0]), \
+        .viaFixedArray = { \
+            .flags = COLUMN_TYPE(PARENT, FIELD[0]), \
             .capacity = sizeof(((PARENT *) NULL)->FIELD) / sizeof(((PARENT *) NULL)->FIELD[0]), \
             .element = NULL, \
         }, \
     }, \
 }
 
-#define DEFINE_OBJECT_FIELD_OBJECT_FIXED_ARRAY(PARENT, FIELD, ELEMENT) { \
+#define DEFINE_COLUMN_OBJECT_FIXED_ARRAY(PARENT, FIELD, ELEMENT) { \
     .name = #FIELD, \
     .kind = cl_COLUMN_FIXED_ARRAY, \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
     { \
-        .fixedArray = { \
+        .viaFixedArray = { \
             .flags = cl_COLUMN_OBJECT, \
             .capacity = sizeof(((PARENT *) NULL)->FIELD) / sizeof(((PARENT *) NULL)->FIELD[0]), \
             .element = ELEMENT, \
@@ -183,27 +209,29 @@ struct clColumnTraits
     }, \
 }
 
-#define DEFINE_OBJECT_FIELD_FLEXIBLE_ARRAY(PARENT, FIELD) { \
+#define DEFINE_COLUMN_FLEXIBLE_ARRAY(PARENT, FIELD) { \
     .name = #FIELD, \
     .kind = cl_COLUMN_FLEXIBLE_ARRAY, \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
     { \
-        .flexibleArray = { \
-            .flags = OBJECT_FIELD_TYPE(PARENT, FIELD[0]), \
+        .viaFlexibleArray = { \
+            .flags = COLUMN_TYPE(PARENT, FIELD[0]), \
+            .capacity = sizeof(((PARENT *) NULL)->FIELD) / sizeof(((PARENT *) NULL)->FIELD[0]), \
             .element = NULL, \
         }, \
     }, \
 }
 
-#define DEFINE_OBJECT_FIELD_OBJECT_FLEXIBLE_ARRAY(PARENT, FIELD, ELEMENT) { \
+#define DEFINE_COLUMN_OBJECT_FLEXIBLE_ARRAY(PARENT, FIELD, ELEMENT) { \
     .name = #FIELD, \
     .kind = cl_COLUMN_FLEXIBLE_ARRAY, \
     .size = sizeof(((PARENT *) NULL)->FIELD), \
     .offset = offsetof(PARENT, FIELD), \
     { \
-        .flexibleArray = { \
+        .viaFlexibleArray = { \
             .flags = cl_COLUMN_OBJECT, \
+            .capacity = sizeof(((PARENT *) NULL)->FIELD) / sizeof(((PARENT *) NULL)->FIELD[0]), \
             .element = ELEMENT, \
         }, \
     }, \
@@ -215,9 +243,9 @@ struct clColumnTraits
     .size = sizeof(TYPE), \
     .offset = 0, \
     { \
-        .object = { \
+        .viaObject = { \
             .num = sizeof(FIELDS) / sizeof(FIELDS[0]), \
-            .element = FIELDS, \
+            .fields = FIELDS, \
         }, \
     }, \
 }

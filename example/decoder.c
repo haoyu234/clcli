@@ -7,44 +7,12 @@ struct Decoder
 {
     bool hasError;
 
-    uint8_t *baseAddr;
+    uint8_t *addr;
+    size_t size;
     ptrdiff_t offset;
 
     msgpack_object *object;
 };
-
-static inline void WriteArraySize(uint8_t kind, const void *addr, uint32_t size)
-{
-    switch (kind)
-    {
-        case cl_COLUMN_INT8:
-            DEREF(addr, int8_t) = size;
-            break;
-        case cl_COLUMN_INT16:
-            DEREF(addr, int16_t) = size;
-            break;
-        case cl_COLUMN_INT32:
-            DEREF(addr, int32_t) = size;
-            break;
-        case cl_COLUMN_INT64:
-            DEREF(addr, int64_t) = size;
-            break;
-        case cl_COLUMN_UINT8:
-            DEREF(addr, uint8_t) = size;
-            break;
-        case cl_COLUMN_UINT16:
-            DEREF(addr, uint16_t) = size;
-            break;
-        case cl_COLUMN_UINT32:
-            DEREF(addr, uint32_t) = size;
-            break;
-        case cl_COLUMN_UINT64:
-            DEREF(addr, uint64_t) = size;
-            break;
-        default:
-            assert(false);
-    }
-}
 
 static inline void VisitNumber(
     const clHandler *handler, 
@@ -53,6 +21,10 @@ static inline void VisitNumber(
 {
     const msgpack_object *object = decoder->object;
     const ptrdiff_t offset = decoder->offset;
+
+    CHECK_MEMORY(
+        decoder,
+        kind);
 
     CHECK_COND_ERROR(
         decoder,
@@ -66,37 +38,37 @@ static inline void VisitNumber(
     switch (kind)
     {
         case cl_COLUMN_INT8:
-            DEREF(decoder->baseAddr + offset, int8_t) = object->via.i64;
+            DEREF(decoder->addr + offset, int8_t) = object->via.i64;
             break ;
         case cl_COLUMN_INT16:
-            DEREF(decoder->baseAddr + offset, int16_t) = object->via.i64;
+            DEREF(decoder->addr + offset, int16_t) = object->via.i64;
             break ;
         case cl_COLUMN_INT32:
-            DEREF(decoder->baseAddr + offset, int32_t) = object->via.i64;
+            DEREF(decoder->addr + offset, int32_t) = object->via.i64;
             break ;
         case cl_COLUMN_INT64:
-            DEREF(decoder->baseAddr + offset, int64_t) = object->via.i64;
+            DEREF(decoder->addr + offset, int64_t) = object->via.i64;
             break ;
         case cl_COLUMN_UINT8:
-            DEREF(decoder->baseAddr + offset, uint8_t) = object->via.u64;
+            DEREF(decoder->addr + offset, uint8_t) = object->via.u64;
             break ;
         case cl_COLUMN_UINT16:
-            DEREF(decoder->baseAddr + offset, uint16_t) = object->via.u64;
+            DEREF(decoder->addr + offset, uint16_t) = object->via.u64;
             break ;
         case cl_COLUMN_UINT32:
-            DEREF(decoder->baseAddr + offset, uint32_t) = object->via.u64;
+            DEREF(decoder->addr + offset, uint32_t) = object->via.u64;
             break ;
         case cl_COLUMN_UINT64:
-            DEREF(decoder->baseAddr + offset, uint64_t) = object->via.u64;
+            DEREF(decoder->addr + offset, uint64_t) = object->via.u64;
             break ;
         case cl_COLUMN_FLOAT32:
-            DEREF(decoder->baseAddr + offset, float) = object->via.f64;
+            DEREF(decoder->addr + offset, float) = object->via.f64;
             break;
         case cl_COLUMN_FLOAT64:
-            DEREF(decoder->baseAddr + offset, double) = object->via.f64;
+            DEREF(decoder->addr + offset, double) = object->via.f64;
             break;
         case cl_COLUMN_BOOL:
-            DEREF(decoder->baseAddr + offset, bool) = object->via.boolean;
+            DEREF(decoder->addr + offset, bool) = object->via.boolean;
             break ;
         default:
             assert(false);
@@ -135,44 +107,10 @@ static inline void VisitArray(
     }
     else
     {
-        static uint32_t NUMBER_SIZES[] = {
-            0, // cl_COLUMN_NONE
-            sizeof(int8_t), // cl_COLUMN_INT8
-            sizeof(int16_t), // cl_COLUMN_INT16
-            sizeof(int32_t), // cl_COLUMN_INT32
-            sizeof(int64_t), // cl_COLUMN_INT64
-            0, // cl_COLUMN_INT128
-            0, // cl_COLUMN_INT256
-            sizeof(uint8_t), // cl_COLUMN_UINT8
-            sizeof(uint16_t), // cl_COLUMN_UINT16
-            sizeof(uint32_t), // cl_COLUMN_UINT32
-            sizeof(uint64_t), // cl_COLUMN_UINT64
-            0, // cl_COLUMN_UINT128
-            0, // cl_COLUMN_UINT256
-            0, // cl_COLUMN_FLOAT8
-            0, // cl_COLUMN_FLOAT16
-            #ifdef __HAVE_FLOAT32
-                sizeof(_Float32), // cl_COLUMN_FLOAT32
-            #else
-                4,
-            #endif
-            #ifdef __HAVE_FLOAT64
-                sizeof(_Float64), // cl_COLUMN_FLOAT64
-            #else
-                8,
-            #endif
-            0, // cl_COLUMN_FLOAT128
-            0, // cl_COLUMN_FLOAT256,
-            sizeof(bool), // cl_COLUMN_BOOL
-        };
-
-        assert(kind < sizeof(NUMBER_SIZES) / sizeof(NUMBER_SIZES[0]));
-        assert(NUMBER_SIZES[kind] > 0);
-
         for (i = 0; i < num; ++ i)
         {
             decoder->object = object->via.array.ptr + i;
-            decoder->offset = offset + NUMBER_SIZES[kind] * i;
+            decoder->offset = offset + SIZE(kind) * i;
 
             VisitNumber(
                 handler, 
@@ -206,10 +144,10 @@ static inline void VisitObjectHandler(
     CHECK_COND_ERROR(
         decoder,
         object->type == MSGPACK_OBJECT_ARRAY
-        && object->via.array.size == column->object.num);
+        && object->via.array.size == column->viaObject.num);
 
-    const uint32_t num = column->object.num;
-    const clColumn *columns = column->object.element;
+    const uint32_t num = column->viaObject.num;
+    const clColumn *columns = column->viaObject.fields;
 
     uint32_t i = 0;
 
@@ -227,6 +165,29 @@ static inline void VisitObjectHandler(
     }
 }
 
+static inline void VisitUnionHandler(
+    const clHandler *handler, 
+    const clColumn *column, 
+    struct Decoder *decoder)
+{
+    const ptrdiff_t offset = decoder->offset;
+
+    const clColumn *prev_column = column - 1;
+
+    const uint32_t pos = ReadMemoryAsUInt32(
+        prev_column->kind, 
+        decoder->addr + offset + prev_column->offset - column->offset);
+
+    CHECK_COND_ERROR(
+        decoder,
+        pos && pos <= column->viaObject.num);
+    
+    clVisitChildren(
+        handler, 
+        column->viaUnion.fields + pos - 1,
+        decoder);
+}
+
 static inline void VisitFixedArrayHandler(
     const clHandler *handler, 
     const clColumn *column, 
@@ -237,13 +198,13 @@ static inline void VisitFixedArrayHandler(
     CHECK_COND_ERROR(
         decoder,
         object->type == MSGPACK_OBJECT_ARRAY
-        && object->via.array.size == column->fixedArray.capacity);
+        && object->via.array.size == column->viaFixedArray.capacity);
 
     VisitArray(
         handler,
-        column->fixedArray.capacity,
-        column->fixedArray.flags,
-        column->fixedArray.element,
+        column->viaFixedArray.capacity,
+        column->viaFixedArray.flags,
+        column->viaFixedArray.element,
         decoder);
 }
 
@@ -261,31 +222,36 @@ static inline void VisitFlexibleArrayHandler(
     
     const clColumn *prev_column = column - 1;
 
-    WriteArraySize(
+    const uint32_t num = ReadMemoryAsUInt32(
         prev_column->kind, 
-        decoder->baseAddr + offset + prev_column->offset - column->offset,
-        object->via.array.size);
+        decoder->addr + offset + prev_column->offset - column->offset);
+
+    CHECK_COND_ERROR(
+        decoder,
+        object->via.array.size == num);
 
     VisitArray(
         handler,
         object->via.array.size,
-        column->flexibleArray.flags,
-        column->flexibleArray.element,
+        column->viaFlexibleArray.flags,
+        column->viaFlexibleArray.element,
         decoder);
 }
 
 static struct clHandler handler = {
     .visitNumber = (clVisitHandler) VisitNumberHandler,
     .visitObject = (clVisitHandler) VisitObjectHandler,
+    .visitUnion = (clVisitHandler) VisitUnionHandler,
     .visitFixedArray = (clVisitHandler) VisitFixedArrayHandler,
     .visitFlexibleArray = (clVisitHandler) VisitFlexibleArrayHandler,
 };
 
 size_t cFromBuf(
     const clColumn *column, 
-    void *baseAddr, 
+    void *addr, 
+    size_t size,
     const uint8_t *buf, 
-    size_t size)
+    size_t len)
 {
     msgpack_unpacked unpacked;
     msgpack_unpacked_init(&unpacked);
@@ -294,12 +260,13 @@ size_t cFromBuf(
     msgpack_unpack_return ret = msgpack_unpack_next(
         &unpacked, 
         (const char *) buf, 
-        size, 
+        len, 
         &offset);
 
     struct Decoder decoder = {
         .hasError = (ret != MSGPACK_UNPACK_SUCCESS),
-        .baseAddr = (uint8_t *) baseAddr,
+        .addr = (uint8_t *) addr,
+        .size = size,
         .offset = 0,
         .object = &unpacked.data
     };

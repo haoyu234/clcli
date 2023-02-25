@@ -4,8 +4,9 @@
 #include "visit.h"
 #include "util.h"
 
-void VisitStruct(CXCursor cursor);
-void VisitStructField(CXCursor cursor, CXCursor parent);
+
+void VisitUnionOrStruct(CXCursor cursor);
+void VisitUnionOrStructField(CXCursor cursor, CXCursor parent);
 
 void LineInfo(CXCursor cursor)
 {
@@ -16,24 +17,81 @@ void LineInfo(CXCursor cursor)
     clang_getPresumedLocation(loc, &name, &line, &col);
 
     fmt::print(
-        "// line {}:{}:{}\n",
+        "//line {}:{}:{}\n",
         clang_getCString(name),
         line,
-        col
-    );
+        col);
     
     clang_disposeString(name);
 }
 
-void HandleStructFieldNumber(CXCursor cursor, CXCursor parent)
+void LineError(CXCursor cursor)
+{
+    CXType type = clang_getCursorType(cursor);
+    CXType type2 = clang_getCanonicalType(type);
+
+    const bool is_definition = clang_isCursorDefinition(cursor);
+    if (!is_definition)
+    {
+        fmt::print(
+            "#error {} {}\n",
+            GetTypeSpelling(type2),
+            GetCursorDisplayName(cursor));
+        return ;
+    }
+
+    CXSourceLocation loc = clang_getCursorLocation(cursor);
+
+    CXString name;
+    unsigned int line = 0, col = 0;
+    clang_getPresumedLocation(loc, &name, &line, &col);
+
+    fmt::print(
+        "#error {} {}:{}:{}\n",
+        GetTypeSpelling(type2),
+        clang_getCString(name),
+        line,
+        col);
+
+    clang_disposeString(name);
+}
+
+bool CheckHasField(CXCursor cursor)
+{
+    bool hasField = false;
+
+    visitChildren(
+        cursor,
+        [&](const CXCursor cursor) {
+            if (!hasField)
+            {
+                switch (cursor.kind)
+                {
+                    case CXCursor_CXXBaseSpecifier:
+                        hasField = CheckHasField(cursor);
+                        break;
+                    case CXCursor_FieldDecl:
+                        hasField = true;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    );
+
+    return hasField;
+}
+
+void HandleFieldNumber(CXCursor cursor, CXCursor parent)
 {
     fmt::print(
-        "    DEFINE_OBJECT_FIELD_NUMBER({}, {}),\n",
+        "    DEFINE_COLUMN_NUMBER({}, {}),\n",
         GetTypeSpelling(clang_getCursorType(parent)),
         GetCursorDisplayName(cursor));
 }
 
-void HandleStructFieldArray(CXCursor cursor, CXCursor parent)
+void HandleFieldArray(CXCursor cursor, CXCursor parent)
 {
     CXType type = clang_getCursorType(cursor);
     CXType elementType = clang_getArrayElementType(type);
@@ -43,7 +101,7 @@ void HandleStructFieldArray(CXCursor cursor, CXCursor parent)
     if (elementTypeDecl.kind != CXCursor_NoDeclFound)
     {
         fmt::print(
-            "    DEFINE_OBJECT_FIELD_OBJECT_FIXED_ARRAY({}, {}, {}Object),\n",
+            "    DEFINE_COLUMN_OBJECT_FIXED_ARRAY({}, {}, {}Object),\n",
             GetTypeSpelling(clang_getCursorType(parent)),
             GetCursorDisplayName(cursor),
             GetCursorDisplayName(elementTypeDecl));
@@ -51,29 +109,55 @@ void HandleStructFieldArray(CXCursor cursor, CXCursor parent)
     else
     {
         fmt::print(
-            "    DEFINE_OBJECT_FIELD_FIXED_ARRAY({}, {}),\n",
+            "    DEFINE_COLUMN_FIXED_ARRAY({}, {}),\n",
             GetTypeSpelling(clang_getCursorType(parent)),
             GetCursorDisplayName(cursor));
     }
 }
 
-void HandleStructFieldRecord(CXCursor cursor, CXCursor parent)
+void HandleFieldStruct(CXCursor cursor, CXCursor parent)
 {
     CXType type = clang_getCursorType(cursor);
     CXCursor elementTypeDecl = clang_getTypeDeclaration(
         clang_getCanonicalType(type));
 
     fmt::print(
-        "    DEFINE_OBJECT_FIELD_OBJECT({}, {}, {}Object),\n",
+        "    DEFINE_COLUMN_OBJECT({}, {}, {}Object),\n",
         GetTypeSpelling(clang_getCursorType(parent)),
         GetCursorDisplayName(cursor),
         GetCursorDisplayName(elementTypeDecl));
 }
 
-void HandleStructField(CXCursor cursor, CXCursor parent)
+void HandleFieldUnion(CXCursor cursor, CXCursor parent)
+{
+    CXType type = clang_getCursorType(cursor);
+    CXCursor elementTypeDecl = clang_getTypeDeclaration(
+        clang_getCanonicalType(type));
+
+    CXType parentType = clang_getCursorType(parent);
+    
+    fmt::print(
+        "    DEFINE_COLUMN_UNION({}, {}, {}Columns),\n",
+        GetTypeSpelling(parentType),
+        GetCursorDisplayName(cursor),
+        GetCursorDisplayName(elementTypeDecl));
+}
+
+void HandleField(CXCursor cursor, CXCursor parent)
 {
     CXType type = clang_getCursorType(cursor);
     CXType type2 = clang_getCanonicalType(type);
+
+    CXCursor fieldTypeDecl = clang_getTypeDeclaration(type2);
+    switch (fieldTypeDecl.kind)
+    {
+        case CXCursor_StructDecl:
+            return HandleFieldStruct(cursor, parent);
+        case CXCursor_UnionDecl:
+            return HandleFieldUnion(cursor, parent);
+        default:
+            break;
+    }
 
     switch (type2.kind)
     {
@@ -101,116 +185,102 @@ void HandleStructField(CXCursor cursor, CXCursor parent)
         case CXType_Half:
         case CXType_Float16:
         case CXType_Enum:
-            return HandleStructFieldNumber(cursor, parent);
+            return HandleFieldNumber(cursor, parent);
         case CXType_ConstantArray:
-            return HandleStructFieldArray(cursor, parent);
-        case CXType_Record:
-            return HandleStructFieldRecord(cursor, parent);
+            return HandleFieldArray(cursor, parent);
         default:
-            fmt::print(
-                "#error unsupported type {} {}\n",
-                GetTypeSpelling(type2),
-                GetCursorDisplayName(cursor));
-            return ;
+            LineError(cursor);
+            break;
     }
 }
 
-void HandleStructBase(CXCursor cursor, CXCursor parent)
+void HandleBaseClass(CXCursor cursor, CXCursor parent)
 {
     visitChildren(
         cursor,
-        VisitStructField,
+        VisitUnionOrStructField,
         parent
     );
 }
 
-void VisitStructField(CXCursor cursor, CXCursor parent)
+void VisitUnionOrStructField(CXCursor cursor, CXCursor parent)
 {
     switch (cursor.kind)
     {
         case CXCursor_CXXBaseSpecifier:
-            return HandleStructBase(
+            return HandleBaseClass(
                 clang_getCursorDefinition(cursor),
                 parent);
         case CXCursor_FieldDecl:
-            return HandleStructField(cursor, parent);
+            return HandleField(cursor, parent);
+        case CXCursor_StructDecl:
+        case CXCursor_UnionDecl:
+            return LineError(cursor);
         default:
             return ;
     }
 }
 
-bool CheckStructHasField(CXCursor cursor)
-{
-    bool hasField = false;
-
-    visitChildren(
-        cursor,
-        [&](const CXCursor cursor) {
-            if (!hasField)
-            {
-                switch (cursor.kind)
-                {
-                    case CXCursor_CXXBaseSpecifier:
-                        hasField = CheckStructHasField(cursor);
-                        break;
-                    case CXCursor_FieldDecl:
-                        hasField = true;
-                        break;
-                    default:
-                        break;
-                }
-            }
-        }
-    );
-
-    return hasField;
-}
-
-void VisitStruct(CXCursor cursor)
+void HandleStruct(CXCursor cursor)
 {
     auto name = GetCursorDisplayName(cursor);
+    const CXType type = clang_getCursorType(cursor);
+
+    fmt::print(
+        "static const clColumn {}Object[] = {{\n",
+        name);
+    fmt::print(
+        "    DEFINE_OBJECT({}, {}Columns)\n",
+        GetTypeSpelling(type),
+        name);
+    fmt::print("}};\n");
+}
+
+void VisitUnionOrStruct(CXCursor cursor)
+{
+    const auto name = GetCursorDisplayName(cursor);
     if (name.empty())
     {
         return;
     }
 
-    const CXType type = clang_getCursorType(cursor);
-    if (CheckStructHasField(cursor))
+    if (!CheckHasField(cursor))
     {
-        fmt::print("\n");
+        return ;
+    }
 
-        LineInfo(cursor);
+    fmt::print("\n");
 
-        fmt::print(
-            "static const clColumn {}Columns[] = {{\n",
-            name);
+    LineInfo(cursor);
 
-        visitChildren(
-            cursor,
-            VisitStructField,
-            cursor
-        );
+    fmt::print(
+        "static const clColumn {}Columns[] = {{\n",
+        name);
 
-        fmt::print("}};\n");
-        fmt::print(
-            "static const clColumn {}Object[] = {{\n",
-            name);
-        fmt::print(
-            "    DEFINE_OBJECT({}, {}Columns)\n",
-            GetTypeSpelling(type),
-            name);
-        fmt::print("}};\n");
+    visitChildren(
+        cursor,
+        VisitUnionOrStructField,
+        cursor
+    );
+
+    fmt::print("}};\n");
+
+    if (cursor.kind == CXCursor_StructDecl 
+        || cursor.kind == CXCursor_ClassDecl)
+    {
+        HandleStruct(cursor);
     }
 }
 
-void SearchNamespaceOrStruct(CXCursor cursor)
+void SearchNamespaceOrUnionOrStruct(CXCursor cursor)
 {
     visitChildren(
         cursor,
         [](const CXCursor cursor) {
             if (cursor.kind != CXCursor_StructDecl 
                 && cursor.kind != CXCursor_Namespace
-                && cursor.kind != CXCursor_ClassDecl)
+                && cursor.kind != CXCursor_ClassDecl
+                && cursor.kind != CXCursor_UnionDecl)
             {
                 return;
             }
@@ -224,18 +294,17 @@ void SearchNamespaceOrStruct(CXCursor cursor)
 
             if (cursor.kind == CXCursor_Namespace)
             {
-                SearchNamespaceOrStruct(cursor);
+                SearchNamespaceOrUnionOrStruct(cursor);
+                return;
             }
-            else
-            {
-                bool is_definition = clang_isCursorDefinition(cursor);
-                if (!is_definition)
-                {
-                    return;
-                }
 
-                VisitStruct(cursor);
+            const bool is_definition = clang_isCursorDefinition(cursor);
+            if (!is_definition)
+            {
+                return;
             }
+
+            VisitUnionOrStruct(cursor);
         }
     );
 }
@@ -245,7 +314,7 @@ void VisitTranslationUnit(CXTranslationUnit unit)
     fmt::print("#pragma once\n\n");
     fmt::print("#include <columns.h>\n");
 
-    SearchNamespaceOrStruct(
+    SearchNamespaceOrUnionOrStruct(
         clang_getTranslationUnitCursor(unit)
     );
 }

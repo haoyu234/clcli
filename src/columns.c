@@ -31,6 +31,16 @@ void clVisitChildren(
                 encoder, 
                 column, 
                 context);
+        case cl_COLUMN_OBJECT:
+            return encoder->visitObject(
+                encoder, 
+                column, 
+                context);
+        case cl_COLUMN_UNION:
+            return encoder->visitUnion(
+                encoder, 
+                column, 
+                context);
         case cl_COLUMN_FIXED_ARRAY:
             return encoder->visitFixedArray(
                 encoder, 
@@ -38,11 +48,6 @@ void clVisitChildren(
                 context);
         case cl_COLUMN_FLEXIBLE_ARRAY:
             return encoder->visitFlexibleArray(
-                encoder, 
-                column, 
-                context);
-        case cl_COLUMN_OBJECT:
-            return encoder->visitObject(
                 encoder, 
                 column, 
                 context);

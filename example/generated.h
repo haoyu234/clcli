@@ -1,30 +1,32 @@
 #pragma once
 
 #include <columns.h>
-  
-typedef struct uv_statfs_s uv_statfs_t;
-struct uv_statfs_s {
-  uint64_t f_type;
-  uint64_t f_bsize;
-  uint64_t f_blocks;
-  uint64_t f_bfree;
-  uint64_t f_bavail;
-  uint64_t f_files;
-  uint64_t f_ffree;
-  uint64_t f_spare[4];
+
+union stJsonUnion
+{
+  int64_t i64;
+  uint64_t u64;
+  double f64;
 };
 
-// ./example/generated.h:6:8
-static const clColumn uv_statfs_sColumns[] = {
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_type),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_bsize),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_blocks),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_bfree),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_bavail),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_files),
-    DEFINE_OBJECT_FIELD_NUMBER(struct uv_statfs_s, f_ffree),
-    DEFINE_OBJECT_FIELD_FIXED_ARRAY(struct uv_statfs_s, f_spare),
+struct stJson
+{
+  uint8_t kind;
+  union stJsonUnion via;
 };
-static const clColumn uv_statfs_sObject[] = {
-    DEFINE_OBJECT(struct uv_statfs_s, uv_statfs_sColumns)
+
+//line example/generated.h:5:7
+static const clColumn stJsonUnionColumns[] = {
+    DEFINE_COLUMN_NUMBER(union stJsonUnion, i64),
+    DEFINE_COLUMN_NUMBER(union stJsonUnion, u64),
+    DEFINE_COLUMN_NUMBER(union stJsonUnion, f64),
+};
+
+//line example/generated.h:12:8
+static const clColumn stJsonColumns[] = {
+    DEFINE_COLUMN_NUMBER(struct stJson, kind),
+    DEFINE_COLUMN_UNION(struct stJson, via, stJsonUnionColumns),
+};
+static const clColumn stJsonObject[] = {
+    DEFINE_OBJECT(struct stJson, stJsonColumns)
 };
