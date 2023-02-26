@@ -2,41 +2,42 @@
 #include <fmt/format.h>
 
 #include "visit.h"
+#include "builder.h"
 
 void processFile(
     const char *path, 
     int argc, 
     const char *argv[])
 {
+    auto builder = NewBuilder();
     CXIndex index = clang_createIndex(0, 0);
-    CXTranslationUnit tu = clang_parseTranslationUnit(
+    CXTranslationUnit translationUnit = clang_parseTranslationUnit(
         index,
         path,
         argv, argc,
         0, 0,
-        CXTranslationUnit_SkipFunctionBodies
-        | CXTranslationUnit_SingleFileParse);
+        CXTranslationUnit_SkipFunctionBodies);
 
     uint32_t flags = 0;
 
-    size_t num  = clang_getNumDiagnostics(tu);
+    size_t num  = clang_getNumDiagnostics(translationUnit);
     for (size_t i = 0; i < num; ++ i)
     {
-        CXDiagnostic diagnostic = clang_getDiagnostic(tu, i);
+        CXDiagnostic diagnostic = clang_getDiagnostic(translationUnit, i);
         CXString message = clang_getDiagnosticSpelling(diagnostic);
         CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
-        CXSourceLocation loc = clang_getDiagnosticLocation(diagnostic);
+        CXSourceLocation location = clang_getDiagnosticLocation(diagnostic);
 
         CXString name;
-        unsigned int line = 0, col = 0;
-        clang_getPresumedLocation(loc, &name, &line, &col);
+        unsigned int line = 0, column = 0;
+        clang_getPresumedLocation(location, &name, &line, &column);
 
         fmt::print(
             stderr,
             "{}:{}:{} message: {}\n",
             clang_getCString(name),
             line,
-            col,
+            column,
             clang_getCString(message));
 
         clang_disposeString(name);
@@ -46,10 +47,15 @@ void processFile(
         flags |= severity;
     }
 
-    VisitTranslationUnit(tu);
+    VisitTranslationUnit(
+        builder, 
+        translationUnit);
 
-    clang_disposeTranslationUnit(tu);
+    clang_disposeTranslationUnit(translationUnit);
     clang_disposeIndex(index);
+
+    builder->Output(stdout);
+    FreeBuilder(builder);
 }
 
 int main(int argc, const char *argv[])
@@ -73,6 +79,5 @@ int main(int argc, const char *argv[])
         argv[1],
         argc - 2,
         argv + 2);
-
     return EXIT_SUCCESS;
 }

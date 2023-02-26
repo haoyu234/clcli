@@ -34,6 +34,7 @@ executable(
         'clcli/main.cpp',
         'clcli/visit.cpp',
         'clcli/util.cpp',
+        'clcli/builder.cpp',
     ],
     include_directories: [
         'include',

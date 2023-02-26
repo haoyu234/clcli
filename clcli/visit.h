@@ -3,8 +3,9 @@
 #include <functional>
 #include <clang-c/Index.h>
 
-void VisitStruct(CXCursor cursor);
-void VisitTranslationUnit(CXTranslationUnit unit);
+struct Builder;
+
+void VisitTranslationUnit(Builder *builder, CXTranslationUnit unit);
 
 namespace internal
 {
@@ -41,11 +42,12 @@ namespace internal
 }
 
 template <typename T, typename ...ARGS>
-void visitChildren(CXCursor cursor, T&& handler, ARGS&& ...args)
+void visitChildren(Builder *builder, CXCursor cursor, T&& handler, ARGS&& ...args)
 {
     internal::Handler<CXCursor> callback(
         std::bind(
             std::forward<T>(handler),
+            builder,
             std::placeholders::_1,
             std::forward<ARGS>(args)...)
     );
@@ -58,11 +60,12 @@ void visitChildren(CXCursor cursor, T&& handler, ARGS&& ...args)
 }
 
 template <typename T, typename ...ARGS>
-void visitField(CXType type, T&& handler, ARGS&& ...args)
+void visitField(Builder *builder, CXType type, T&& handler, ARGS&& ...args)
 {
     internal::Handler<CXCursor> callback(
         std::bind(
             std::forward<T>(handler),
+            builder,
             std::placeholders::_1,
             std::forward<ARGS>(args)...)
     );
