@@ -33,7 +33,7 @@ void HandleFieldArray(Builder *builder, CXCursor cursor)
     CXType type = clang_getCursorType(cursor);
     CXType elementType = clang_getArrayElementType(type);
 
-    builder->DefineFixedArrayField(
+    builder->DefineArrayField(
         cursor,
         clang_getTypeDeclaration(
             clang_getCanonicalType(elementType))
@@ -52,12 +52,6 @@ void HandleField(Builder *builder, CXCursor cursor)
     {
         builder->DefineObjectField(cursor);
         return ;
-    }
-
-    auto name = GetCursorSpelling(cursor);
-    if (name == "skins")
-    {
-        int i = 0;
     }
 
     switch (canonicalType.kind)
@@ -189,6 +183,21 @@ void SearchNamespaceOrUnionOrStruct(Builder *builder, CXCursor cursor)
 
 void VisitTranslationUnit(Builder *builder, CXTranslationUnit unit)
 {
+    visitInclusion(
+        builder,
+        unit,
+        [unit](Builder *builder, uint32_t depth, CXFile includedFile) {
+            if (!depth)
+            {
+                auto name = clang_getFileName(includedFile);
+                auto nameStr = GetString(name);
+                clang_disposeString(name);
+
+                builder->Include(nameStr);
+            }
+        }
+    );
+
     SearchNamespaceOrUnionOrStruct(
         builder,
         clang_getTranslationUnitCursor(unit)

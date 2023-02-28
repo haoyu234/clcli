@@ -2,6 +2,11 @@
 
 #include "util.h"
 
+std::string GetString(CXString string)
+{
+    return clang_getCString(string);
+}
+
 std::string GetTypeSpelling(CXType type)
 {
     CXString spelling = clang_getTypeSpelling(type);

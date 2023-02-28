@@ -71,7 +71,6 @@ struct clFixedArray {
 
 struct clFlexibleArray {
     uint8_t flags;
-    const clColumn *len;
     uint32_t capacity;
     const clColumn *element;
 };

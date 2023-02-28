@@ -9,10 +9,10 @@ void VisitTranslationUnit(Builder *builder, CXTranslationUnit unit);
 
 namespace internal
 {
-    template <typename T>
+    template <class ...ARGS>
     struct Handler {
     private:
-        std::function<void (T)> handler;
+        std::function<void (ARGS...)> handler;
     public:
 
         template <typename F>
@@ -27,7 +27,9 @@ namespace internal
             CXCursor parent,
             CXClientData context)
         {
-            reinterpret_cast<Handler<T> *>(context)->handler(cursor);
+            reinterpret_cast<Handler<ARGS...> *>(context)->handler(
+                cursor
+            );
             return CXChildVisit_Continue;
         }
 
@@ -35,8 +37,22 @@ namespace internal
             CXCursor cursor,
             CXClientData context)
         {
-            reinterpret_cast<Handler<T> *>(context)->handler(cursor);
+            reinterpret_cast<Handler<ARGS...> *>(context)->handler(
+                cursor
+            );
             return CXVisit_Continue;
+        }
+
+        static void visitInclusionHandler(
+            CXFile includedFile,
+            CXSourceLocation *inclusionStack,
+            unsigned int includeLen,
+            CXClientData context)
+        {
+            reinterpret_cast<Handler<ARGS...> *>(context)->handler(
+                includeLen,
+                includedFile
+            );
         }
     };
 }
@@ -73,6 +89,25 @@ void visitField(Builder *builder, CXType type, T&& handler, ARGS&& ...args)
     clang_Type_visitFields(
         type,
         internal::Handler<CXCursor>::visitFieldHandler,
+        &callback
+    );
+}
+
+template <typename T, typename ...ARGS>
+void visitInclusion(Builder *builder, CXTranslationUnit unit, T&& handler, ARGS&& ...args)
+{
+    internal::Handler<uint32_t, CXFile> callback(
+        std::bind(
+            std::forward<T>(handler),
+            builder,
+            std::placeholders::_1,
+            std::placeholders::_2,
+            std::forward<ARGS>(args)...)
+    );
+
+    clang_getInclusions(
+        unit,
+        internal::Handler<uint32_t, CXFile>::visitInclusionHandler,
         &callback
     );
 }

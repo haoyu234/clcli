@@ -2,6 +2,10 @@
 
 #include <columns.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 size_t cToBuf(
     const clColumn *column,
     const void *addr,
@@ -15,3 +19,7 @@ size_t cFromBuf(
     size_t size,
     const uint8_t *buf,
     size_t len);
+
+#ifdef __cplusplus
+}
+#endif
