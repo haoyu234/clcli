@@ -115,7 +115,7 @@ void BuilderV1::LeaveObject()
 
         fmt::format_to(
             std::back_inserter(headerBuffer),
-            "extern const clColumn {}Object[];\n",
+            "extern const struct clColumn {}Object[];\n",
             currentObjectDisplayName
         );
     }
