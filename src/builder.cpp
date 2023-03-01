@@ -103,7 +103,7 @@ void BuilderV1::LeaveObject()
         
         fmt::format_to(
             std::back_inserter(sourceBuffer),
-            "    DEFINE_OBJECT({}, {}Columns)\n",
+            "    DEFINE_OBJECT({}, {}Columns),\n",
             currentObjectType,
             currentObjectDisplayName
         );
@@ -313,7 +313,7 @@ std::string BuilderV1::GetSource()
     
     fmt::format_to(
         std::back_inserter(source),
-        "\n{:{}}", 
+        "\n{:.{}}", 
         sourceBuffer.data(), 
         sourceBuffer.size()
     );
@@ -344,7 +344,7 @@ std::string BuilderV1::GetSourceHeader()
     
     fmt::format_to(
         std::back_inserter(sourceHeader),
-        "\n{:{}}", 
+        "\n{:.{}}", 
         headerBuffer.data(), 
         headerBuffer.size()
     );
